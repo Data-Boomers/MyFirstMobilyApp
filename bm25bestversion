@@ -1,0 +1,77 @@
+from scipy.stats import gmean
+
+class SearchTFIDF:
+    def __init__(self, n_gram_size=N_GRAM_SIZE):
+        self.n_gram_size = n_gram_size
+
+        self.documents = None
+        self.documents_ngrams = None
+
+    def fit(
+        self,
+        documents,
+    ):
+        self.documents = documents
+
+        self.documents_ngrams = documents_to_index(
+            documents,
+            n_gram_size=self.n_gram_size,
+        )
+
+    def search(self, query, limit=5):
+        idx_scores = search_tf_idf(
+            self.documents_ngrams,
+            query,
+            limit=limit,
+            n_gram_size=self.n_gram_size,
+        )
+        return idx_scores[:limit]
+
+    def search_and_display(self, query, limit=5):
+        idx_scores = self.search(query, limit=limit)
+        display_search_results(self.documents, idx_scores)
+        
+class TwoStageSearch:
+    def __init__(self, n_gram_size=3):
+        self.n_gram_size = n_gram_size
+        self.documents = None
+        self.tfidf_index = None
+        self.bm25_index = None
+
+    def fit(
+        self,
+        documents,
+    ):
+        self.documents = documents
+
+        self.tfidf_index = SearchTFIDF(n_gram_size=self.n_gram_size)
+        self.tfidf_index.fit(self.documents)
+
+        self.bm25_index = SearchBM25()
+        self.bm25_index.fit(self.documents)
+
+    def search(self, query, limit_stage1=100, limit_stage2=5):
+        idx_scores_stage1 = self.tfidf_index.search(query, limit=limit_stage1)
+        idx_scores_stage1 = [p for p in idx_scores_stage1 if p[1] > 1e-05]
+        idx_to_score_stage1 = {
+            idx: score for idx, score in idx_scores_stage1
+        }
+        only_document_indexes = list(idx_to_score_stage1.keys())
+        idx_scores_stage2 = self.bm25_index.search_bm25(query, limit=limit_stage2, only_documents=only_document_indexes)
+
+        aggregated_scores = {
+            idx: gmean([score, idx_to_score_stage1[idx]]) for idx, score in idx_scores_stage2
+        }
+        idx_scores = [(idx, idx_to_score_stage1[idx], score, aggregated_scores[idx]) for idx, score in idx_scores_stage2]
+
+        idx_scores = sorted(idx_scores, key=lambda x: (-round(x[-1],3), -round(x[-2],3), -round(x[-3], 3)))
+
+        return idx_scores
+
+    def display_search_results(self, idx_scores, char_limit=100):
+        for idx, score_stage1, score_stage2, score_combined in idx_scores:
+            print(f'{score_stage1:0.2f}|{score_stage2:0.2f}|{score_combined:0.2f}: {self.documents[idx][:char_limit]}')
+
+    def search_and_display(self, query, limit_stage1=100, limit_stage2=5, char_limit=100):
+        idx_scores = self.search(query, limit_stage1=limit_stage1, limit_stage2=limit_stage2)
+        self.display_search_results(idx_scores, char_limit=char_limit)
