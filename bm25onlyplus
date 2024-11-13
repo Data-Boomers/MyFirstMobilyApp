@@ -1,0 +1,136 @@
+def documents_to_words(documents):
+    documents_words = tuple([doc.split(' ') for doc in documents])
+    documents_words = tuple(documents_words)
+    return documents_words
+
+def bm25_documents_to_index(documents):
+    documents_preprocessed = [
+        preprocess_document(doc) for doc in documents
+    ]
+
+    documents_words = documents_to_words(documents_preprocessed)
+    return documents_words
+
+def bm25_query_to_words(query):
+    return bm25_documents_to_index([query])[0]
+
+def idf_bm25(
+    number_documents_containing_ngram,
+    total_documents,
+):
+    x = (total_documents - number_documents_containing_ngram + 0.5)/(number_documents_containing_ngram + 0.5)
+    return np.log(x + 1)
+
+def tf_bm25(ngram_tf, document_length, average_document_length, k1=1.5, b=0.75, delta=1):
+    numerator = ngram_tf*(k1+1)
+    denominator = ngram_tf + (k1 * (1 - b + b * document_length/average_document_length))
+    return numerator/denominator + delta
+
+def bm25_score(
+    ngram_idf,
+    ngram_tf,
+    document_length,
+    average_document_length,
+    k1=1.5,
+    b=0.75,
+):
+    numerator = ngram_tf*(k1+1)
+    denominator = ngram_tf + (k1 * (1 - b + b * document_length/average_document_length))
+    return ngram_idf * tf_bm25(ngram_tf, document_length, average_document_length, k1=k1, b=b)
+
+
+class SearchBM25:
+    def __init__(self):
+        self.documents = None
+        self.documents_ngrams = None
+        self.tf = None
+        self.idf = None
+
+    def calculate_tf(self, documents_ngrams):
+        tf = [Counter(doc_ngrams) for doc_ngrams in documents_ngrams]
+
+        return tf
+
+    def calculate_idf(self, tf, documents_ngrams):
+        idf = {}
+
+        documents_containing = {}
+
+        for doc_tf in tqdm(tf):
+            for ngram in doc_tf.keys():
+                if not ngram in documents_containing:
+                    documents_containing[ngram] = 0
+                documents_containing[ngram] += 1
+
+        for ngram in tqdm(documents_containing.keys()):
+            idf[ngram] = idf_bm25(
+                number_documents_containing_ngram=documents_containing[ngram],
+                total_documents=len(documents_ngrams),
+            )
+        return idf
+
+    def fit(
+        self,
+        documents,
+    ):
+        self.documents = documents
+
+        self.documents_ngrams = bm25_documents_to_index(
+            documents,
+        )
+
+        self.tf = self.calculate_tf(self.documents_ngrams)
+        self.idf = self.calculate_idf(self.tf, self.documents_ngrams)
+
+    def search_bm25(
+        self,
+        query,
+        limit,
+        only_documents=None,
+    ):
+        avg_document_length = sum([
+            len(doc) for doc in self.documents_ngrams
+        ])/len(self.documents_ngrams)
+        query = bm25_query_to_words(query)
+        indexes = []
+        match_scores = []
+
+        document_indexes = range(len(self.tf)) if only_documents is None else only_documents
+        for i in document_indexes:
+            document_tf = self.tf[i]
+
+            document_length = sum(document_tf.values())
+            if document_length == 0:
+                continue
+
+            score = 0
+            for query_ngram in query:
+                ngram_score = bm25_score(
+                    self.idf.get(query_ngram, 1e-6),
+                    document_tf.get(query_ngram, 1e-6),
+                    document_length=document_length,
+                    average_document_length=avg_document_length,
+                )
+                score += ngram_score
+            match_scores.append(score)
+            indexes.append(i)
+
+        idx_scores = zip(indexes, match_scores)
+        idx_scores = sorted(idx_scores, key=lambda pair: -pair[1])
+        return idx_scores[:limit]
+
+
+    def search(self, query, limit=5):
+        idx_scores = self.search_bm25(
+            query,
+            limit=limit,
+        )
+        return idx_scores[:limit]
+
+    def search_and_display(self, query, limit=5, char_limit=100):
+        idx_scores = self.search(query, limit=limit)
+        display_search_results(self.documents, idx_scores, char_limit=char_limit)
+
+
+index = SearchBM25()
+index.fit(documents)
