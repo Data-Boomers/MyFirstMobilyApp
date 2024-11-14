@@ -1,0 +1,23 @@
+import pandas as pd
+from collections import Counter
+import numpy as np
+from tqdm import tqdm
+
+documents = train_df['text'].astype(str).tolist()
+
+index = SearchBM25()
+
+index.fit(documents)
+
+query = "пример текста для поиска"
+
+results = index.search(query=query, limit=5)
+if results:
+    best_doc_index, best_score = results[0]  
+    best_doc = documents[best_doc_index]
+    print(f"Лучший результат:")
+    print(f"Индекс документа в train_df: {best_doc_index}")
+    print(f"Оценка BM25: {best_score:.4f}")
+    print(f"Фрагмент документа:\n{best_doc[:300]}...\n")
+else:
+    print("Совпадений не найдено.")
